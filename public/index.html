@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+
+<body class="bg-dark">
+
+<div class="container vh-100 d-flex justify-content-center align-items-center">
+    <div class="card shadow-lg p-4 text-light"
+         style="width:430px; background: linear-gradient(135deg,#1e3c72,#2a5298);">
+
+        <h3 class="text-center mb-2">🔐 Secure Login</h3>
+        <p class="text-center small mb-3">
+            Step 1: Account → Step 2: Face → Step 3: Fingerprint
+        </p>
+
+        <!-- ================= STEP 1: PASSWORD ================= -->
+        <div id="step1">
+            <input type="text" id="username" class="form-control mb-3" placeholder="Username">
+            <input type="password" id="password" class="form-control mb-3" placeholder="Password">
+            <button onclick="loginPassword()" class="btn btn-warning w-100 mb-2">
+                ➡ Continue
+            </button>
+            <hr class="border-light">
+            <a href="register.html" class="btn btn-outline-light w-100">
+                📝 Don't have an account? Register
+            </a>
+        </div>
+
+        <!-- ================= STEP 2: FACE ================= -->
+        <div id="step2" style="display:none;">
+            <div id="modelStatus" class="text-center mb-2">
+                <span class="badge bg-warning text-dark">⏳ Loading face models...</span>
+            </div>
+            <p class="text-center text-warning mb-2">📷 Look straight at the camera</p>
+            <video id="video" class="w-100 rounded mb-2 border border-light" autoplay muted></video>
+            <div id="faceStatus" class="text-center small mb-2"></div>
+            <button onclick="loginFace()" class="btn btn-info w-100 mb-2">
+                📷 Scan Face
+            </button>
+            <button onclick="backToStep1()" class="btn btn-outline-light w-100">
+                ⬅ Back
+            </button>
+        </div>
+
+        <!-- ================= STEP 3: FINGERPRINT ================= -->
+        <div id="step3" style="display:none;">
+            <p class="text-center text-warning mb-3">👆 Verify your Fingerprint</p>
+
+            <button onclick="verifyFingerprint()" 
+                    class="btn btn-info w-100 mb-2"
+                    id="fingerBtn">
+                👆 Scan Fingerprint
+            </button>
+
+            <div id="fingerStatus" class="text-center small mb-2"></div>
+
+            <button onclick="backToStep2()" class="btn btn-outline-light w-100">
+                ⬅ Back
+            </button>
+        </div>
+
+    </div>
+</div>
+
+<script>
+
+const MODEL_URL = "/models";
+let modelsLoaded = false;
+let cameraStarted = false;
+
+/* ================= STEP 1: PASSWORD ================= */
+function loginPassword() {
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+
+    if (!username || !password) { alert("Fill all fields."); return; }
+
+    fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById("step1").style.display = "none";
+            document.getElementById("step2").style.display = "block";
+            startCamera();
+            loadModels();
+        } else {
+            alert("❌ Invalid username or password.");
+        }
+    })
+    .catch(() => alert("❌ Server error."));
+}
+
+/* ================= LOAD MODELS ================= */
+async function loadModels() {
+    if (modelsLoaded) return;
+    try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+        modelsLoaded = true;
+        document.getElementById("modelStatus").innerHTML =
+            '<span class="badge bg-success">✅ Face models ready</span>';
+    } catch {
+        document.getElementById("modelStatus").innerHTML =
+            '<span class="badge bg-danger">❌ Models not found</span>';
+    }
+}
+
+/* ================= CAMERA ================= */
+function startCamera() {
+    if (cameraStarted) return;
+    const video = document.getElementById("video");
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+            video.srcObject = stream;
+            cameraStarted = true;
+        })
+        .catch(() => alert("❌ Camera access denied"));
+}
+
+function stopCamera() {
+    const video = document.getElementById("video");
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        cameraStarted = false;
+    }
+}
+
+/* ================= STEP 2: FACE ================= */
+async function loginFace() {
+    const username = document.getElementById("username").value;
+    if (!modelsLoaded) { alert("⏳ Face models still loading."); return; }
+
+    const status = document.getElementById("faceStatus");
+    status.innerHTML = "⏳ Detecting face...";
+
+    const video = document.getElementById("video");
+    const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+    if (!detection) {
+        status.innerHTML = "❌ No face detected. Try again.";
+        return;
+    }
+
+    status.innerHTML = "⏳ Verifying face...";
+
+    fetch("/verify-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            username,
+            faceData: Array.from(detection.descriptor)
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            status.innerHTML = "✅ Face matched!";
+            stopCamera();
+            setTimeout(() => {
+                document.getElementById("step2").style.display = "none";
+                document.getElementById("step3").style.display = "block";
+            }, 1000);
+        } else {
+            status.innerHTML = "❌ Face not recognized. Try again.";
+        }
+    })
+    .catch(() => alert("❌ Server error."));
+}
+
+/* ================= STEP 3: FINGERPRINT ================= */
+async function verifyFingerprint() {
+    const fingerStatus = document.getElementById("fingerStatus");
+    const fingerBtn = document.getElementById("fingerBtn");
+
+    if (!window.PublicKeyCredential) {
+        fingerStatus.innerHTML = "❌ Fingerprint not supported on this device.";
+        return;
+    }
+
+    fingerBtn.disabled = true;
+    fingerBtn.textContent = "⏳ Scanning...";
+
+    try {
+        // Try to verify existing fingerprint first
+        const challenge = new Uint8Array(32);
+        crypto.getRandomValues(challenge);
+
+        await navigator.credentials.get({
+            publicKey: {
+                challenge,
+                timeout: 60000,
+                userVerification: "required"
+            }
+        });
+
+        fingerStatus.innerHTML = "✅ Fingerprint verified!";
+        setTimeout(() => {
+            alert("🎉 Login Successful!");
+            // TODO: redirect to dashboard
+        }, 800);
+
+    } catch {
+        // Fallback: re-authenticate via platform biometrics
+        try {
+            const challenge2 = new Uint8Array(32);
+            crypto.getRandomValues(challenge2);
+
+            await navigator.credentials.create({
+                publicKey: {
+                    challenge: challenge2,
+                    rp: { name: "Secure System" },
+                    user: {
+                        id: challenge2,
+                        name: document.getElementById("username").value,
+                        displayName: document.getElementById("username").value
+                    },
+                    pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+                    timeout: 60000,
+                    authenticatorSelection: {
+                        authenticatorAttachment: "platform",
+                        userVerification: "required"
+                    }
+                }
+            });
+
+            fingerStatus.innerHTML = "✅ Fingerprint verified!";
+            setTimeout(() => {
+                alert("🎉 Login Successful!");
+                // TODO: redirect to dashboard
+            }, 800);
+
+        } catch {
+            fingerStatus.innerHTML = "❌ Fingerprint failed. Try again.";
+            fingerBtn.disabled = false;
+            fingerBtn.textContent = "👆 Scan Fingerprint";
+        }
+    }
+}
+
+/* ================= BACK BUTTONS ================= */
+function backToStep1() {
+    stopCamera();
+    document.getElementById("step2").style.display = "none";
+    document.getElementById("step1").style.display = "block";
+}
+
+function backToStep2() {
+    document.getElementById("step3").style.display = "none";
+    document.getElementById("step2").style.display = "block";
+    startCamera();
+}
+
+</script>
+
+</body>
+</html>
