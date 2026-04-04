@@ -14,10 +14,11 @@ app.use("/models", express.static(path.join(__dirname, "models")));
 
 /* ================= DATABASE ================= */
 const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "marcface_db"   // ✅ FINAL DATABASE
+    host: process.env.MYSQLHOST || "localhost",
+    user: process.env.MYSQLUSER || "root",
+    password: process.env.MYSQLPASSWORD || "",
+    database: process.env.MYSQLDATABASE || "marcface_db",
+    port: process.env.MYSQLPORT || 3306
 });
 
 db.connect((err) => {
@@ -133,7 +134,7 @@ app.post("/verify-face", (req, res) => {
 });
 
 /* ================= START SERVER ================= */
-app.listen(3000, () => {
-    console.log("🚀 Server running at http://localhost:3000");
+app.listen(process.env.PORT || 3000, () => {
+    console.log("🚀 Server running at http://localhost:" + (process.env.PORT || 3000));
     console.log("📁 Serving models from: ./models/");
 });
