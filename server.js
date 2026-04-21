@@ -53,7 +53,7 @@ app.post("/register", async (req, res) => {
                 const insertId = result.insertId;
 
                 try {
-                    const qrData = `ID:${insertId}|USER:${username}`;
+                    const qrData = `${insertId}-${username}`;
                     const qrImage = await QRCode.toDataURL(qrData, {
                         width: 300,
                         margin: 2,
