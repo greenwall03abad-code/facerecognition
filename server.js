@@ -2,14 +2,12 @@ const express = require("express");
 const mysql = require("mysql2");
 const bcrypt = require("bcrypt");
 const path = require("path");
+const QRCode = require("qrcode");
 
 const app = express();
 app.use(express.json());
 
-// ✅ Serve HTML files from public folder
 app.use(express.static("public"));
-
-// ✅ Serve face-api model files from models folder at /models route
 app.use("/models", express.static(path.join(__dirname, "models")));
 
 /* ================= DATABASE ================= */
@@ -26,14 +24,12 @@ db.connect((err) => {
         console.error("❌ DB CONNECTION ERROR:", err.message);
         return;
     }
-
     console.log("✅ MySQL Connected Successfully!");
     console.log("📦 Active Database:", db.config.database);
 });
 
 /* ================= REGISTER ================= */
 app.post("/register", async (req, res) => {
-
     console.log("REGISTER BODY:", req.body);
 
     const { username, password, faceData } = req.body;
@@ -48,15 +44,29 @@ app.post("/register", async (req, res) => {
         db.query(
             "INSERT INTO users (username, password, face_data) VALUES (?, ?, ?)",
             [username, hashedPassword, JSON.stringify(faceData)],
-            (err) => {
+            async (err, result) => {
                 if (err) {
                     console.log("❌ INSERT ERROR:", err);
-                    return res.json({
-                        success: false,
-                        message: "Username already exists"
-                    });
+                    return res.json({ success: false, message: "Username already exists" });
                 }
-                res.json({ success: true });
+
+                const insertId = result.insertId;
+
+                try {
+                    const qrData = `ID:${insertId}|USER:${username}`;
+                    const qrImage = await QRCode.toDataURL(qrData, {
+                        width: 300,
+                        margin: 2,
+                        color: {
+                            dark: '#000000',
+                            light: '#ffffff'
+                        }
+                    });
+                    res.json({ success: true, qrCode: qrImage, userId: insertId });
+                } catch (qrErr) {
+                    console.log("❌ QR ERROR:", qrErr);
+                    res.json({ success: true, qrCode: null, userId: insertId });
+                }
             }
         );
 
@@ -68,7 +78,6 @@ app.post("/register", async (req, res) => {
 
 /* ================= LOGIN (PASSWORD) ================= */
 app.post("/login", (req, res) => {
-
     console.log("LOGIN BODY:", req.body);
 
     const { username, password } = req.body;
@@ -81,7 +90,6 @@ app.post("/login", (req, res) => {
         "SELECT * FROM users WHERE username = ?",
         [username],
         async (err, result) => {
-
             if (err || result.length === 0) {
                 return res.json({ success: false });
             }
@@ -100,7 +108,6 @@ app.post("/login", (req, res) => {
 
 /* ================= FACE VERIFY ================= */
 app.post("/verify-face", (req, res) => {
-
     console.log("VERIFY FACE BODY:", req.body);
 
     const { username, faceData } = req.body;
@@ -113,7 +120,6 @@ app.post("/verify-face", (req, res) => {
         "SELECT face_data FROM users WHERE username = ?",
         [username],
         (err, result) => {
-
             if (err || result.length === 0) {
                 return res.json({ success: false });
             }

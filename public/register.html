@@ -8,7 +8,7 @@
 
 <body class="bg-dark">
 
-<div class="container vh-100 d-flex justify-content-center align-items-center">
+<div class="container py-5 d-flex justify-content-center align-items-center">
     <div class="card shadow-lg p-4 text-light"
          style="width:400px; background: linear-gradient(135deg,#1e3c72,#2a5298);">
 
@@ -18,16 +18,32 @@
             <span class="badge bg-warning text-dark">⏳ Loading face models...</span>
         </div>
 
-        <input type="text"     id="username" class="form-control mb-3" placeholder="Username">
-        <input type="password" id="password" class="form-control mb-3" placeholder="Password">
+        <!-- Registration Form -->
+        <div id="reg-form">
+            <input type="text"     id="username" class="form-control mb-3" placeholder="Username">
+            <input type="password" id="password" class="form-control mb-3" placeholder="Password">
 
-        <video id="video" class="w-100 rounded mb-3 border border-light" autoplay muted></video>
+            <video id="video" class="w-100 rounded mb-3 border border-light" autoplay muted></video>
 
-        <!-- Status message shown after capture -->
-        <div id="captureStatus" class="text-center mb-2 small"></div>
+            <div id="captureStatus" class="text-center mb-2 small"></div>
 
-        <button onclick="capture()"      class="btn btn-warning w-100 mb-2">📸 Capture Face</button>
-        <button onclick="registerUser()" class="btn btn-success w-100">✅ Register</button>
+            <button onclick="capture()"      class="btn btn-warning w-100 mb-2">📸 Capture Face</button>
+            <button id="reg-btn" onclick="registerUser()" class="btn btn-success w-100">✅ Register</button>
+        </div>
+
+        <!-- QR Code Result (hidden until register success) -->
+        <div id="qr-result" style="display:none;" class="text-center mt-2">
+            <hr class="border-light">
+            <h5>🎉 Registration Successful!</h5>
+            <p class="small text-warning mb-1">Your QR Code — save or print this!</p>
+            <p class="small text-light mb-3" id="qr-username"></p>
+            <img id="qr-image" src="" style="width:220px;height:220px;"
+                 class="border border-light rounded bg-white p-2"/>
+            <br><br>
+            <button onclick="printQR()" class="btn btn-warning w-100 mb-2">🖨️ Print QR Code</button>
+            <button onclick="downloadQR()" class="btn btn-info w-100 mb-2">📥 Download QR Code</button>
+            <button onclick="window.location.href='/index.html'" class="btn btn-success w-100">➡️ Go to Login</button>
+        </div>
 
     </div>
 </div>
@@ -98,6 +114,10 @@
         if (!username || !password) { alert("Fill all fields."); return; }
         if (!faceDescriptor)        { alert("Capture your face first."); return; }
 
+        const regBtn = document.getElementById("reg-btn");
+        regBtn.disabled = true;
+        regBtn.textContent = "⏳ Registering...";
+
         fetch("/register", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -106,14 +126,57 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                // ✅ Redirect to login page after successful registration
-                alert("✅ Registered successfully! Redirecting to login...");
-                window.location.href = "/index.html";
+                // Hide form, show QR
+                document.getElementById("reg-form").style.display = "none";
+                document.getElementById("qr-username").textContent = `👤 ${username} | ID: ${data.userId}`;
+                document.getElementById("qr-image").src = data.qrCode;
+                document.getElementById("qr-result").style.display = "block";
+
+                // Stop camera
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(t => t.stop());
+                }
             } else {
                 alert("❌ " + (data.message || "Registration failed."));
+                regBtn.disabled = false;
+                regBtn.textContent = "✅ Register";
             }
         })
-        .catch(() => alert("❌ Server error."));
+        .catch(() => {
+            alert("❌ Server error.");
+            regBtn.disabled = false;
+            regBtn.textContent = "✅ Register";
+        });
+    }
+
+    /* ================= PRINT QR ================= */
+    function printQR() {
+        const qrSrc = document.getElementById("qr-image").src;
+        const username = document.getElementById("qr-username").textContent;
+        const win = window.open('', '_blank');
+        win.document.write(`
+            <html>
+            <head><title>QR Code</title></head>
+            <body style="text-align:center; padding:60px; font-family:Arial;">
+                <h2>🤖 Face Recognition System</h2>
+                <h3>${username}</h3>
+                <img src="${qrSrc}" style="width:300px;height:300px;"/>
+                <p style="margin-top:20px; font-size:14px;">Scan this QR code to login</p>
+                <script>window.onload = () => { window.print(); }<\/script>
+            </body>
+            </html>
+        `);
+        win.document.close();
+    }
+
+    /* ================= DOWNLOAD QR ================= */
+    function downloadQR() {
+        const qrSrc = document.getElementById("qr-image").src;
+        const username = document.getElementById("username").value || "qrcode";
+        const a = document.createElement("a");
+        a.href = qrSrc;
+        a.download = `QR_${username}.png`;
+        a.click();
     }
 </script>
 </body>
