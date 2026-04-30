@@ -1,4 +1,4 @@
-require('dotenv').config();
+if (process.env.NODE_ENV !== 'production') require('dotenv').config();
 const express = require("express");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
@@ -96,5 +96,3 @@ app.post("/verify-face", async (req, res) => {
 /* ================= START SERVER ================= */
 app.listen(process.env.PORT || 3000, () => {
     console.log("🚀 Server running at http://localhost:" + (process.env.PORT || 3000));
-    console.log("📁 Serving models from: ./models/");
-});
