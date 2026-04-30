@@ -1,5 +1,5 @@
 const express = require("express");
-const mysql = require("mysql2");
+const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const path = require("path");
 const QRCode = require("qrcode");
@@ -11,132 +11,84 @@ app.use(express.static("public"));
 app.use("/models", express.static(path.join(__dirname, "models")));
 
 /* ================= DATABASE ================= */
-const db = mysql.createConnection({
-    host: process.env.MYSQLHOST || "localhost",
-    user: process.env.MYSQLUSER || "root",
-    password: process.env.MYSQLPASSWORD || "",
-    database: process.env.MYSQLDATABASE || "marcface_db",
-    port: process.env.MYSQLPORT || 3306
+const db = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
 });
 
-db.connect((err) => {
-    if (err) {
-        console.error("❌ DB CONNECTION ERROR:", err.message);
-        return;
-    }
-    console.log("✅ MySQL Connected Successfully!");
-    console.log("📦 Active Database:", db.config.database);
-});
+db.connect()
+    .then(() => console.log("✅ Supabase PostgreSQL Connected!"))
+    .catch(err => console.error("❌ DB CONNECTION ERROR:", err.message));
 
 /* ================= REGISTER ================= */
 app.post("/register", async (req, res) => {
     console.log("REGISTER BODY:", req.body);
-
     const { username, password, faceData } = req.body;
-
-    if (!username || !password || !faceData) {
+    if (!username || !password || !faceData)
         return res.json({ success: false, message: "Missing data" });
-    }
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-
-        db.query(
-            "INSERT INTO users (username, password, face_data) VALUES (?, ?, ?)",
-            [username, hashedPassword, JSON.stringify(faceData)],
-            async (err, result) => {
-                if (err) {
-                    console.log("❌ INSERT ERROR:", err);
-                    return res.json({ success: false, message: "Username already exists" });
-                }
-
-                const insertId = result.insertId;
-
-                try {
-                    const qrData = `${insertId}-${username}`;
-                    const qrImage = await QRCode.toDataURL(qrData, {
-                        width: 300,
-                        margin: 2,
-                        color: {
-                            dark: '#000000',
-                            light: '#ffffff'
-                        }
-                    });
-                    res.json({ success: true, qrCode: qrImage, userId: insertId });
-                } catch (qrErr) {
-                    console.log("❌ QR ERROR:", qrErr);
-                    res.json({ success: true, qrCode: null, userId: insertId });
-                }
-            }
+        const result = await db.query(
+            "INSERT INTO users (username, password, face_data) VALUES ($1, $2, $3) RETURNING id",
+            [username, hashedPassword, JSON.stringify(faceData)]
         );
-
+        const insertId = result.rows[0].id;
+        const qrData = `${insertId}-${username}`;
+        const qrImage = await QRCode.toDataURL(qrData, {
+            width: 300, margin: 2,
+            color: { dark: '#000000', light: '#ffffff' }
+        });
+        res.json({ success: true, qrCode: qrImage, userId: insertId });
     } catch (error) {
         console.log("❌ REGISTER ERROR:", error);
-        res.json({ success: false });
+        res.json({ success: false, message: "Username already exists" });
     }
 });
 
 /* ================= LOGIN (PASSWORD) ================= */
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
     console.log("LOGIN BODY:", req.body);
-
     const { username, password } = req.body;
+    if (!username || !password) return res.json({ success: false });
 
-    if (!username || !password) {
-        return res.json({ success: false });
+    try {
+        const result = await db.query(
+            "SELECT * FROM users WHERE username = $1", [username]
+        );
+        if (result.rows.length === 0) return res.json({ success: false });
+        const user = result.rows[0];
+        const match = await bcrypt.compare(password, user.password);
+        res.json({ success: match });
+    } catch (err) {
+        console.log("❌ LOGIN ERROR:", err);
+        res.json({ success: false });
     }
-
-    db.query(
-        "SELECT * FROM users WHERE username = ?",
-        [username],
-        async (err, result) => {
-            if (err || result.length === 0) {
-                return res.json({ success: false });
-            }
-
-            const user = result[0];
-            const match = await bcrypt.compare(password, user.password);
-
-            if (!match) {
-                return res.json({ success: false });
-            }
-
-            res.json({ success: true });
-        }
-    );
 });
 
 /* ================= FACE VERIFY ================= */
-app.post("/verify-face", (req, res) => {
+app.post("/verify-face", async (req, res) => {
     console.log("VERIFY FACE BODY:", req.body);
-
     const { username, faceData } = req.body;
+    if (!username || !faceData) return res.json({ success: false });
 
-    if (!username || !faceData) {
-        return res.json({ success: false });
-    }
-
-    db.query(
-        "SELECT face_data FROM users WHERE username = ?",
-        [username],
-        (err, result) => {
-            if (err || result.length === 0) {
-                return res.json({ success: false });
-            }
-
-            const savedFace = JSON.parse(result[0].face_data);
-
-            let sum = 0;
-            for (let i = 0; i < savedFace.length; i++) {
-                sum += Math.pow(savedFace[i] - faceData[i], 2);
-            }
-
-            const distance = Math.sqrt(sum);
-            console.log("FACE DISTANCE:", distance);
-
-            res.json({ success: distance < 0.6 });
+    try {
+        const result = await db.query(
+            "SELECT face_data FROM users WHERE username = $1", [username]
+        );
+        if (result.rows.length === 0) return res.json({ success: false });
+        const savedFace = JSON.parse(result.rows[0].face_data);
+        let sum = 0;
+        for (let i = 0; i < savedFace.length; i++) {
+            sum += Math.pow(savedFace[i] - faceData[i], 2);
         }
-    );
+        const distance = Math.sqrt(sum);
+        console.log("FACE DISTANCE:", distance);
+        res.json({ success: distance < 0.6 });
+    } catch (err) {
+        console.log("❌ VERIFY ERROR:", err);
+        res.json({ success: false });
+    }
 });
 
 /* ================= START SERVER ================= */
